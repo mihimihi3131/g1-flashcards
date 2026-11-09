@@ -120,7 +120,11 @@ textarea { min-height: 96px; font-family: var(--font-hud); font-size: .85rem; }
 .todo-list li.done span { text-decoration: line-through; color: var(--muted); }
 .todo-list input { width: 22px; height: 22px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.hud-img { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.star-canvas { display: none; }
+.sky-info { white-space: pre-wrap; font-size: .9rem; line-height: 1.7; margin: 0; overflow-wrap: anywhere; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js" integrity="sha384-LTVHvxfbG3XHla4Lu0C0s9U18B2sBOuzJIeOoVHm2t05SOOORvMbBMEVjXrGau9g" crossorigin="anonymous"></script>
 </head>
 <body>
 <main>
@@ -194,15 +198,31 @@ textarea { min-height: 96px; font-family: var(--font-hud); font-size: .85rem; }
 
   </div>
 
-  <div class="app-panel" data-app="prompter">
+  <div class="app-panel" data-app="sky">
     <section class="panel">
-      <h2>原稿</h2>
-      <p class="note">メガネには5行ずつ表示します。右タップで次、左タップで前のページです。空行で段落を分けられます。</p>
-      <textarea id="tpText" aria-label="原稿" style="min-height:220px"></textarea>
-      <div class="row">
-        <label class="check"><input type="checkbox" id="tpAuto"> 自動で送る</label>
-        <div><label for="tpSec">1ページの秒数</label><input type="number" id="tpSec" min="2" max="120" value="8"></div>
-      </div>
+      <h2>星空情報</h2>
+      <p class="note" id="skyPlace"></p>
+      <pre class="sky-info" id="skyInfo"></pre>
+    </section>
+    <section class="panel">
+      <h2>場所</h2>
+      <p class="note">月や惑星の時刻は場所で変わります。雲の量は Open-Meteo（無料の天気サービス）から取得し、そのとき緯度・経度だけを送ります。</p>
+      <button id="skyGps">現在地を使う</button>
+      <form class="row" id="skyForm">
+        <div><label for="skyLat">緯度</label><input type="number" id="skyLat" step="0.001"></div>
+        <div><label for="skyLon">経度</label><input type="number" id="skyLon" step="0.001"></div>
+        <button type="submit">この場所にする</button>
+      </form>
+      <p class="note" id="skyMsg" aria-live="polite"></p>
+    </section>
+  </div>
+
+  <div class="app-panel" data-app="stars">
+    <section class="panel">
+      <h2>星座図</h2>
+      <p class="note">見たい方角の空の星座の線を、メガネに画像で表示します。<b>右タップで右へ45°</b>、<b>左タップで上を見る</b>（地平線 → 中くらい → 高い → 天頂 → 地平線…）。場所は「星空情報」で決めた場所を使います。画像を送るのに数秒かかります。</p>
+      <label class="check"><input type="checkbox" id="stNames" checked> 星座名を表示する</label>
+      <canvas class="star-canvas" id="stCanvas" width="576" height="136"></canvas>
     </section>
   </div>
 
@@ -247,7 +267,9 @@ const TX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 const LINE_WIDTH = 38, LINES = 5, CHUNK = 180;
 const sides = { L: null, R: null };      // { device, tx }
-let seq = 0, writeChain = Promise.resolve(), hbTimer = null, hbN = 0;
+let seq = 0, hbTimer = null, hbN = 0, hbPaused = false;
+const queues = { L: Promise.resolve(), R: Promise.resolve() };
+const waiters = [];
 
 const $ = (id) => document.getElementById(id);
 function log(msg) {
@@ -291,18 +313,28 @@ function splitUtf8(str, limit) {
   return chunks;
 }
 
-function sendBoth(bytes) {
-  // 公式仕様: 左 → 右の順に送る。送信は1つずつ順番に。
-  writeChain = writeChain.then(async () => {
-    for (const s of ["L", "R"]) {
-      const c = sides[s];
-      if (!c || !c.device.gatt.connected) continue;
-      try { await c.tx.writeValueWithResponse(bytes); }
-      catch (e) { log(`${s} 送信失敗: ${e.message}`); }
-    }
-  });
-  return writeChain;
+// 片側に送る（左右それぞれ1つずつ順番に送る）
+function writeSide(s, bytes) {
+  const c = sides[s];
+  if (!c || !c.device.gatt.connected) return Promise.resolve(false);
+  const p = queues[s].then(() => c.tx.writeValueWithResponse(bytes)).then(() => true, (e) => { log(`${s} 送信失敗: ${e.message}`); return false; });
+  queues[s] = p;
+  return p;
 }
+// 公式仕様: 左 → 右の順に送る
+async function sendBoth(bytes) {
+  await writeSide("L", bytes);
+  await writeSide("R", bytes);
+}
+// メガネからの応答（先頭バイトが cmd のもの）を待つ
+function waitResp(side, cmd, ms) {
+  return new Promise((res) => {
+    const w = { side, cmd, res };
+    waiters.push(w);
+    setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); res(null); } }, ms);
+  });
+}
+const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, "0")).join(" ");
 
 async function showOnGlasses(lines) {
   if (!sides.L && !sides.R) return;
@@ -319,6 +351,7 @@ async function showOnGlasses(lines) {
 function startHeartbeat() {
   if (hbTimer) return;
   hbTimer = setInterval(() => {
+    if (hbPaused) return;
     hbN = (hbN + 1) & 0xff;
     sendBoth(Uint8Array.from([0x25, 6, 0, hbN, 4, hbN]));
   }, 8000);
@@ -360,7 +393,11 @@ async function attach(side, device) {
   startHeartbeat();
   if ($("wake").checked) requestWake();
   if (sides.L && sides.R) { connMsg(""); $("connectPanel").hidden = true; }
-  if (lastScreen) showOnGlasses(lastScreen);
+  resendLast();
+}
+function resendLast() {
+  if (lastScreen && lastScreen.canvas) { if (stLastBmp) sendImage(stLastBmp); }
+  else if (lastScreen) showOnGlasses(lastScreen);
 }
 
 /* 一度つないだメガネに、開いたときに自動でつなぐ */
@@ -415,6 +452,8 @@ function setPill(side, on) {
 }
 
 function onNotify(side, d) {
+  const w = waiters.find((x) => x.side === side && x.cmd === d[0]);
+  if (w) { waiters.splice(waiters.indexOf(w), 1); w.res(d); return; }
   if (d[0] !== 0xf5) return;
   log(`タッチ ${side}: ${d[1]}`);
   if (d[1] === 0x00) input("D");        // ダブルタップ
@@ -580,14 +619,17 @@ async function show(lines) {
 //          buttons() スマホのボタン [表示, クラス, 入力] / status() 右下の表示 / action(ev) 独自ボタン
 const APPS = [
   { id: "cards", name: "Flashcards", ja: "単語帳", desc: "タップでめくる暗記カード" },
-  { id: "prompter", name: "Teleprompter", ja: "プロンプター", desc: "原稿を5行ずつ表示" },
+  { id: "sky", name: "Sky tonight", ja: "星空情報", desc: "月・惑星・流星群・雲の量" },
+  { id: "stars", name: "Star map", ja: "星座図", desc: "方角を変えて星座の線を表示" },
   { id: "pomo", name: "Pomodoro", ja: "ポモドーロ", desc: "集中と休憩のタイマー" },
   { id: "todo", name: "ToDo", ja: "ToDo", desc: "タップでチェックするリスト" },
 ];
 const byId = Object.fromEntries(APPS.map((a) => [a.id, a]));
 
 function homeScreen() {
-  return ["G1 Apps        L: next   R: open", ...APPS.map((a, i) => (i === homeCursor ? "> " : "  ") + a.name)];
+  const start = Math.max(0, Math.min(homeCursor - 1, APPS.length - 4));  // 4行に収まるようにずらす
+  const rows = APPS.slice(start, start + 4).map((a, k) => (start + k === homeCursor ? "> " : "  ") + a.name);
+  return [`G1 Apps ${homeCursor + 1}/${APPS.length}      L: next   R: open`, ...rows];
 }
 function goHome() {
   currentApp = null;
@@ -750,52 +792,433 @@ function nextCardRedraw() {
   show([`[${done + 1}/${total}]  box ${box}/${MAX_BOX}`, ...center(wrap(current.f).slice(0, 3), 4)]);
 }
 
-/* ================= テレプロンプター ================= */
-const TP_SAMPLE = `皆さん、こんにちは。今日は「スマートグラスで毎日5分の勉強」についてお話しします。
+/* ================= 星空情報 ================= */
+const SKY_DEFAULT = { lat: 35.681, lon: 139.767, name: "東京（初期設定）" };
+let skyLoc = store.get("skyLoc", SKY_DEFAULT);
+let skyPage = 0, skyData = null, skyClouds = null, skyCloudsAt = 0, skyTimer = null;
+const SKY_PAGES = 5;
+const PLANETS = ["Mercury", "Venus", "Mars", "Jupiter", "Saturn"];
+const PLANET_JA = { Mercury: "水星", Venus: "金星", Mars: "火星", Jupiter: "木星", Saturn: "土星" };
+const DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+const DIRS_JA = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
+// 主な流星群の極大（毎年ほぼ同じ日）
+const SHOWERS = [
+  [1, 4, "Quadrantids", "しぶんぎ座流星群"], [4, 22, "Lyrids", "4月こと座流星群"],
+  [5, 6, "Eta Aquariids", "みずがめ座η流星群"], [8, 13, "Perseids", "ペルセウス座流星群"],
+  [10, 21, "Orionids", "オリオン座流星群"], [11, 17, "Leonids", "しし座流星群"],
+  [12, 14, "Geminids", "ふたご座流星群"],
+];
 
-通勤中や家事の合間に、目の前に単語カードが出てきたら便利だと思いませんか。
+const hm = (d) => (d ? d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false }) : "--:--");
+const md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+const whenStr = (d, now) => (d ? (sameDay(d, now) ? hm(d) : `${md(d)} ${hm(d)}`) : "--");
+const dirIdx = (az) => Math.round(az / 45) % 8;
 
-このアプリでは、メガネのタッチバーをタップするだけでページを送れます。右をタップすると次へ、左をタップすると前に戻ります。
+function moonPhaseName(deg) {
+  const n = [[6, "New moon", "新月"], [84, "Waxing crescent", "三日月"], [96, "First quarter", "上弦の月"],
+    [174, "Waxing gibbous", "十三夜ごろ"], [186, "Full moon", "満月"], [264, "Waning gibbous", "寝待月ごろ"],
+    [276, "Last quarter", "下弦の月"], [354, "Waning crescent", "有明月"], [361, "New moon", "新月"]];
+  return n.find(([lim]) => deg < lim).slice(1);
+}
 
-最後まで聞いていただき、ありがとうございました。`;
-let tpPage = 0, tpTimer = null;
+function skyCompute() {
+  if (typeof Astronomy === "undefined") return null;
+  const A = Astronomy, now = new Date();
+  const obs = new A.Observer(skyLoc.lat, skyLoc.lon, 0);
+  const d = (x) => (x ? x.date : null);
+  // 日の出前（夜中）に開いたときは、前日の夕方から始まった夜として扱う
+  const t0 = new Date(now); t0.setHours(0, 0, 0, 0);
+  const todayRise = d(A.SearchRiseSet("Sun", obs, +1, t0, 1));
+  if (todayRise && now < todayRise) t0.setDate(t0.getDate() - 1);
+  const sunset = d(A.SearchRiseSet("Sun", obs, -1, t0, 1));
+  const dark = d(A.SearchAltitude("Sun", obs, -1, t0, 1, -18));
+  const dawn = d(A.SearchAltitude("Sun", obs, +1, new Date(t0.getTime() + 12 * 3600e3), 1, -18));
+  const sunrise = d(A.SearchRiseSet("Sun", obs, +1, now, 1));
+  const phaseDeg = A.MoonPhase(now);
+  const illum = Math.round(A.Illumination("Moon", now).phase_fraction * 100);
+  const moonRise = d(A.SearchRiseSet("Moon", obs, +1, now, 2));
+  const moonSet = d(A.SearchRiseSet("Moon", obs, -1, now, 2));
+  const age = phaseDeg / 360 * 29.53;
+  const nextFull = d(A.SearchMoonPhase(180, now, 40));
+  const nextNew = d(A.SearchMoonPhase(0, now, 40));
 
-function tpPages() {
-  const lines = wrap(($("tpText").value || "").trim());
-  const pages = [];
-  for (let i = 0; i < lines.length; i += LINES) pages.push(lines.slice(i, i + LINES));
-  return pages.length && $("tpText").value.trim() ? pages : [center(["(no script)", "", "Write it on your phone"])];
+  const planets = PLANETS.map((name) => {
+    const eq = A.Equator(name, now, obs, true, true);
+    const hor = A.Horizon(now, obs, eq.ra, eq.dec, "normal");
+    const mag = A.Illumination(name, now).mag;
+    const rise = hor.altitude > 0 ? null : d(A.SearchRiseSet(name, obs, +1, now, 1));
+    return { name, alt: hor.altitude, az: hor.azimuth, mag, rise };
+  });
+
+  const events = [];
+  if (nextFull) events.push([nextFull, "Full moon", "満月"]);
+  if (nextNew) events.push([nextNew, "New moon", "新月"]);
+  for (const [m, day, en, ja] of SHOWERS) {
+    let dt = new Date(now.getFullYear(), m - 1, day, 23);
+    if (dt < t0) dt = new Date(now.getFullYear() + 1, m - 1, day, 23);
+    events.push([dt, `${en} meteors`, `${ja}が極大`]);
+  }
+  try { const le = A.SearchLunarEclipse(now); events.push([le.peak.date, `Lunar eclipse (${le.kind})`, `月食（${{ penumbral: "半影", partial: "部分", total: "皆既" }[le.kind] || le.kind}）`]); } catch {}
+  try { const se = A.SearchGlobalSolarEclipse(now); events.push([se.peak.date, `Solar eclipse (${se.kind})`, `日食（${{ partial: "部分", annular: "金環", total: "皆既", hybrid: "金環皆既" }[se.kind] || se.kind}・地球のどこかで）`]); } catch {}
+  events.sort((a, b) => a[0] - b[0]);
+
+  return { now, sunset, dark, dawn, sunrise, phaseDeg, illum, moonRise, moonSet, age, nextFull, nextNew, planets, events };
 }
-function tpShow() {
-  const pages = tpPages();
-  tpPage = Math.max(0, Math.min(tpPage, pages.length - 1));
-  if (currentApp === "prompter") { renderControls(); show(pages[tpPage]); }
+
+async function skyFetchClouds() {
+  if (Date.now() - skyCloudsAt < 30 * 60e3 && skyClouds) return;
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${skyLoc.lat.toFixed(2)}&longitude=${skyLoc.lon.toFixed(2)}&hourly=cloud_cover&timezone=auto&forecast_days=2`;
+    const j = await (await fetch(url)).json();
+    skyClouds = j.hourly.time.map((t, i) => [new Date(t), j.hourly.cloud_cover[i]]);
+    skyCloudsAt = Date.now();
+  } catch (e) { log("雲の予報を取得できませんでした: " + e.message); }
 }
-function tpGo(d) { tpPage += d; tpShow(); }
-function tpStop() { clearInterval(tpTimer); tpTimer = null; }
-function tpToggleAuto() {
-  if (tpTimer) return tpStop();
-  const sec = Math.max(2, +$("tpSec").value || 8);
-  tpTimer = setInterval(() => {
-    if (currentApp !== "prompter") return;
-    if (tpPage >= tpPages().length - 1) { tpStop(); renderControls(); return; }
-    tpGo(1);
-  }, sec * 1000);
+function tonightClouds(s) {
+  if (!skyClouds) return [];
+  const from = new Date(Math.max(s.now.getTime(), (s.sunset || s.now).getTime()));
+  from.setMinutes(0, 0, 0);
+  const until = s.dawn ? s.dawn.getTime() + 3600e3 : Infinity;
+  const list = skyClouds.filter(([t]) => t >= from && t.getTime() <= until).slice(0, 8);
+  return list.length ? list : skyClouds.filter(([t]) => t >= from).slice(0, 8);
 }
-function tpInit() {
-  $("tpText").value = store.get("tpText", TP_SAMPLE);
-  $("tpSec").value = store.get("tpSec", 8);
-  $("tpText").addEventListener("input", () => { store.set("tpText", $("tpText").value); tpPage = 0; tpShow(); });
-  $("tpSec").addEventListener("change", () => { store.set("tpSec", +$("tpSec").value); if (tpTimer) { tpStop(); tpToggleAuto(); } });
-  $("tpAuto").addEventListener("change", () => { if ($("tpAuto").checked !== !!tpTimer) tpToggleAuto(); renderControls(); });
+const cloudWord = (c) => (c < 30 ? "good" : c < 70 ? "so-so" : "cloudy");
+const cloudJa = (c) => (c < 30 ? "観測向き" : c < 70 ? "ところどころ雲" : "曇り");
+
+function skyScreen(page) {
+  const s = skyData;
+  if (!s) return center(["Sky tonight", "", "Astronomy data failed to load", "(check your connection)"]);
+  const head = (t) => `${t}`.padEnd(30) + `${page + 1}/${SKY_PAGES}`;
+  const cl = tonightClouds(s);
+  const avg = cl.length ? Math.round(cl.reduce((a, [, c]) => a + c, 0) / cl.length) : null;
+  if (page === 0) {
+    const [en] = moonPhaseName(s.phaseDeg);
+    return [
+      head(`Sky tonight ${md(s.now)}`),
+      `Sunset ${hm(s.sunset)}   Dark ${hm(s.dark)}`,
+      `Moon ${s.illum}% ${en}`,
+      `Moon rise ${whenStr(s.moonRise, s.now)}  set ${whenStr(s.moonSet, s.now)}`,
+      avg === null ? "Clouds: --" : `Clouds tonight ${avg}% (${cloudWord(avg)})`,
+    ];
+  }
+  if (page === 1) {
+    const vis = s.planets.filter((p) => p.alt > 0).sort((a, b) => a.mag - b.mag);
+    const low = s.planets.filter((p) => p.alt <= 0).sort((a, b) => (a.rise || Infinity) - (b.rise || Infinity));
+    const rows = [
+      ...vis.map((p) => `${p.name.padEnd(8)} ${DIRS[dirIdx(p.az)].padEnd(3)} ${String(Math.round(p.alt)).padStart(2)}deg  mag ${p.mag.toFixed(1)}`),
+      ...low.map((p) => `${p.name.padEnd(8)} rises ${whenStr(p.rise, s.now)}`),
+    ];
+    return [head(`Planets at ${hm(s.now)}`), ...rows.slice(0, 4)];
+  }
+  if (page === 2) {
+    const [en] = moonPhaseName(s.phaseDeg);
+    return [
+      head("Moon"),
+      `${en}  ${s.illum}% lit`,
+      `Age ${s.age.toFixed(1)} days`,
+      `Rise ${whenStr(s.moonRise, s.now)}  Set ${whenStr(s.moonSet, s.now)}`,
+      `Full ${s.nextFull ? md(s.nextFull) : "--"}   New ${s.nextNew ? md(s.nextNew) : "--"}`,
+    ];
+  }
+  if (page === 3) {
+    return [head("Coming up"), ...s.events.slice(0, 4).map(([dt, en]) => fit(`${md(dt).padEnd(6)}${en}`))];
+  }
+  const rows = [];
+  for (let i = 0; i < cl.length; i += 2) {
+    rows.push(cl.slice(i, i + 2).map(([t, c]) => `${String(t.getHours()).padStart(2)}h ${String(c).padStart(3)}%`).join("     "));
+  }
+  return [head("Clouds (Open-Meteo)"), ...(rows.length ? rows : ["No forecast (offline?)"])].slice(0, 5);
 }
-Object.assign(byId.prompter, {
-  enter() { tpShow(); },
-  tap(side) { tpGo(side === "R" ? 1 : -1); },
-  dbl() { tpStop(); $("tpAuto").checked = false; return false; },
-  action(ev) { if (ev === "auto") { tpToggleAuto(); $("tpAuto").checked = !!tpTimer; } },
-  buttons() { return [["前へ（左）", "", "L"], ["次へ（右）", "primary", "R"], [tpTimer ? "自動送りを止める" : "自動送りを始める", "small wide", "auto"]]; },
-  status() { return `${tpPage + 1}/${tpPages().length} ページ`; },
+
+function skyRenderPhone() {
+  const s = skyData, el = $("skyInfo");
+  $("skyPlace").textContent = `場所: ${skyLoc.name}（緯度 ${skyLoc.lat.toFixed(2)}, 経度 ${skyLoc.lon.toFixed(2)}）`;
+  if (!s) { el.textContent = "天文データを読み込めませんでした。通信状態を確認してください。"; return; }
+  const [, ja] = moonPhaseName(s.phaseDeg);
+  const cl = tonightClouds(s);
+  const lines = [
+    `■ 今夜（${md(s.now)}）`,
+    `日の入り ${hm(s.sunset)} ／ 暗くなる ${hm(s.dark)} ／ 明け方 ${hm(s.dawn)}`,
+    `月: ${ja}（${s.illum}%・月齢 ${s.age.toFixed(1)}）出 ${whenStr(s.moonRise, s.now)} ／ 入り ${whenStr(s.moonSet, s.now)}`,
+    "",
+    `■ 惑星（${hm(s.now)} 時点）`,
+    ...s.planets.map((p) => p.alt > 0
+      ? `${PLANET_JA[p.name]}: ${DIRS_JA[dirIdx(p.az)]}の空 高さ ${Math.round(p.alt)}° ・ ${p.mag.toFixed(1)}等`
+      : `${PLANET_JA[p.name]}: 地平線の下（次に昇る ${whenStr(p.rise, s.now)}）`),
+    "",
+    "■ これから",
+    ...s.events.slice(0, 6).map(([dt, , ja]) => `${md(dt)} ${ja}`),
+    "",
+    "■ 雲の量（今夜）",
+    cl.length ? cl.map(([t, c]) => `${t.getHours()}時 ${c}%`).join(" ／ ") + (cl.length ? `　→ ${cloudJa(cl.reduce((a, [, c]) => a + c, 0) / cl.length)}` : "") : "予報を取得できませんでした",
+  ];
+  el.textContent = lines.join("\n");
+}
+
+async function skyRefresh() {
+  try { skyData = skyCompute(); } catch (e) { log("天文計算エラー: " + e.message); skyData = null; }
+  await skyFetchClouds();
+  skyRenderPhone();
+  if (currentApp === "sky") { renderControls(); show(skyScreen(skyPage)); }
+}
+function skyUseGps() {
+  if (!navigator.geolocation) { $("skyMsg").textContent = "このブラウザでは位置情報が使えません。"; return; }
+  $("skyMsg").textContent = "現在地を取得しています…";
+  navigator.geolocation.getCurrentPosition((pos) => {
+    skyLoc = { lat: pos.coords.latitude, lon: pos.coords.longitude, name: "現在地" };
+    store.set("skyLoc", skyLoc);
+    $("skyMsg").textContent = "現在地を設定しました。";
+    skyCloudsAt = 0; skyRefresh();
+  }, (err) => {
+    $("skyMsg").textContent = "現在地を取得できませんでした（" + err.message + "）。Chrome の位置情報の許可を確認するか、緯度と経度を入力してください。";
+  }, { timeout: 15000, maximumAge: 3600e3 });
+}
+function skyInit() {
+  $("skyGps").onclick = skyUseGps;
+  $("skyForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const lat = parseFloat($("skyLat").value), lon = parseFloat($("skyLon").value);
+    if (!(Math.abs(lat) <= 90 && Math.abs(lon) <= 180)) { $("skyMsg").textContent = "緯度は -90〜90、経度は -180〜180 の数字で入力してください。"; return; }
+    skyLoc = { lat, lon, name: "手入力の場所" };
+    store.set("skyLoc", skyLoc);
+    $("skyMsg").textContent = "場所を設定しました。";
+    skyCloudsAt = 0; skyRefresh();
+  });
+  $("skyLat").value = skyLoc.lat.toFixed(3);
+  $("skyLon").value = skyLoc.lon.toFixed(3);
+  skyRenderPhone();
+}
+Object.assign(byId.sky, {
+  enter() {
+    show(center(["Sky tonight", "", "Calculating..."]));
+    skyRefresh();
+    clearInterval(skyTimer);
+    skyTimer = setInterval(() => { if (currentApp === "sky") skyRefresh(); else clearInterval(skyTimer); }, 5 * 60e3);
+  },
+  tap(side) {
+    skyPage = (skyPage + (side === "R" ? 1 : SKY_PAGES - 1)) % SKY_PAGES;
+    show(skyScreen(skyPage));
+  },
+  buttons() { return [["前のページ（左）", "", "L"], ["次のページ（右）", "primary", "R"]]; },
+  status() { return `${skyPage + 1}/${SKY_PAGES} ページ`; },
+});
+
+/* ================= 星座図（画像をメガネに送る） ================= */
+const IMG_W = 576, IMG_H = 136;
+const ST_ALTS = [12, 35, 58, 80];       // 見上げる高さ（4段階）
+const ST_SCALE = 309;                   // 立体射影の倍率（横の視野 約100°）
+const ST_DATA = "https://cdn.jsdelivr.net/npm/d3-celestial@0.7.35/data/";
+let stAz = store.get("stAz", 180), stAltIdx = store.get("stAltIdx", 1);
+let stLines = null, stNames = null, stBusy = false, stAgain = false, stTimer = null, stLastSent = 0;
+
+async function stLoad() {
+  if (stLines) return true;
+  try {
+    const [l, n] = await Promise.all([
+      fetch(ST_DATA + "constellations.lines.json").then((r) => r.json()),
+      fetch(ST_DATA + "constellations.json").then((r) => r.json()),
+    ]);
+    const ra = (lon) => ((lon < 0 ? lon + 360 : lon) / 15);
+    stLines = l.features.map((f) => f.geometry.coordinates.map((seg) => seg.map(([lon, dec]) => [ra(lon), dec])));
+    stNames = n.features.map((f) => ({ ja: f.properties.ja || f.properties.name, ra: ra(f.geometry.coordinates[0]), dec: f.geometry.coordinates[1] }));
+    return true;
+  } catch (e) { log("星座データを読み込めませんでした: " + e.message); return false; }
+}
+
+function vecAA(az, alt) {
+  const a = az * Math.PI / 180, h = alt * Math.PI / 180;
+  return [Math.cos(h) * Math.sin(a), Math.cos(h) * Math.cos(a), Math.sin(h)];
+}
+function makeProjector(az0, alt0) {
+  const c = vecAA(az0, alt0), a = az0 * Math.PI / 180, h = alt0 * Math.PI / 180;
+  const r = [Math.cos(a), -Math.sin(a), 0];
+  const u = [-Math.sin(h) * Math.sin(a), -Math.sin(h) * Math.cos(a), Math.cos(h)];
+  const dot = (p, q) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
+  return (az, alt) => {
+    const p = vecAA(az, alt), cs = dot(p, c);
+    if (cs < 0.3) return null;  // 視野の外（後ろ側）
+    const k = 2 / (1 + cs);
+    return [IMG_W / 2 + k * dot(p, r) * ST_SCALE, IMG_H / 2 - k * dot(p, u) * ST_SCALE];
+  };
+}
+
+function stRender(canvas) {
+  const A = Astronomy, now = new Date();
+  const obs = new A.Observer(skyLoc.lat, skyLoc.lon, 0);
+  const alt0 = ST_ALTS[stAltIdx];
+  const proj = makeProjector(stAz, alt0);
+  const hz = (ra, dec) => { const h = A.Horizon(now, obs, ra, dec, "normal"); return [h.azimuth, h.altitude]; };
+  const g = canvas.getContext("2d");
+  canvas.width = IMG_W; canvas.height = IMG_H;
+  g.fillStyle = "#000"; g.fillRect(0, 0, IMG_W, IMG_H);
+  g.strokeStyle = "#fff"; g.fillStyle = "#fff"; g.lineWidth = 2; g.lineCap = "round";
+  const inView = (p) => p && p[0] > -40 && p[0] < IMG_W + 40 && p[1] > -40 && p[1] < IMG_H + 40;
+
+  // 地平線と方角
+  g.setLineDash([3, 5]); g.beginPath();
+  let pen = false;
+  for (let az = stAz - 70; az <= stAz + 70; az += 2) {
+    const p = proj(az, 0);
+    if (!p) { pen = false; continue; }
+    pen ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]); pen = true;
+  }
+  g.stroke(); g.setLineDash([]);
+  g.font = "bold 15px sans-serif"; g.textBaseline = "bottom";
+  for (let i = 0; i < 8; i++) {
+    const p = proj(i * 45, 0);
+    if (p && p[0] > 8 && p[0] < IMG_W - 30 && p[1] < IMG_H + 2) g.fillText(DIRS_JA[i], p[0] - 8, Math.min(p[1] - 2, IMG_H - 1));
+  }
+
+  // 星座の線と星
+  for (const con of stLines) {
+    for (const seg of con) {
+      let prev = null;
+      for (const [ra, dec] of seg) {
+        const [az, alt] = hz(ra, dec);
+        const p = alt > -5 ? proj(az, alt) : null;
+        if (p && prev && inView(p) && inView(prev)) { g.beginPath(); g.moveTo(prev[0], prev[1]); g.lineTo(p[0], p[1]); g.stroke(); }
+        if (p && inView(p)) g.fillRect(p[0] - 2, p[1] - 2, 4, 4);
+        prev = p;
+      }
+    }
+  }
+  // 星座名
+  if ($("stNames").checked) {
+    g.font = "bold 14px sans-serif"; g.textBaseline = "middle";
+    for (const n of stNames) {
+      const [az, alt] = hz(n.ra, n.dec);
+      const p = alt > 0 ? proj(az, alt) : null;
+      if (p && p[0] > 0 && p[0] < IMG_W - 20 && p[1] > 22 && p[1] < IMG_H - 6) {
+        const w = g.measureText(n.ja).width;
+        g.fillStyle = "#000"; g.fillRect(p[0] - w / 2 - 2, p[1] - 9, w + 4, 18);
+        g.fillStyle = "#fff"; g.fillText(n.ja, p[0] - w / 2, p[1]);
+      }
+    }
+  }
+  // 月と惑星
+  g.font = "bold 14px sans-serif"; g.textBaseline = "middle";
+  for (const [body, ja, rad] of [["Moon", "月", 7], ["Venus", "金星", 4], ["Jupiter", "木星", 4], ["Mars", "火星", 3], ["Saturn", "土星", 3], ["Mercury", "水星", 3]]) {
+    const eq = A.Equator(body, now, obs, true, true);
+    const h = A.Horizon(now, obs, eq.ra, eq.dec, "normal");
+    const p = h.altitude > -2 ? proj(h.azimuth, h.altitude) : null;
+    if (!p || p[0] < 0 || p[0] > IMG_W || p[1] < 0 || p[1] > IMG_H) continue;
+    g.beginPath(); g.arc(p[0], p[1], rad, 0, Math.PI * 2);
+    body === "Moon" ? g.stroke() : g.fill();
+    g.fillText(ja, p[0] + rad + 3, p[1]);
+  }
+  // 見出し（左上）
+  const label = `${DIRS_JA[dirIdx(stAz)]}・高さ${alt0}°  ${hm(now)}`;
+  g.font = "bold 14px sans-serif"; g.textBaseline = "top";
+  const w = g.measureText(label).width;
+  g.fillStyle = "#000"; g.fillRect(0, 0, w + 8, 18);
+  g.fillStyle = "#fff"; g.fillText(label, 3, 2);
+  g.textAlign = "right"; g.fillText("R:右へ L:上へ", IMG_W - 3, 2); g.textAlign = "left";
+}
+
+/* canvas → G1 用の 1bit BMP（576×136、下の行から、白=点灯） */
+function canvasToBmp(canvas) {
+  const px = canvas.getContext("2d").getImageData(0, 0, IMG_W, IMG_H).data;
+  const rowBytes = IMG_W / 8, dataLen = rowBytes * IMG_H;
+  const out = new Uint8Array(62 + dataLen + 2);
+  const dv = new DataView(out.buffer);
+  out[0] = 0x42; out[1] = 0x4d;
+  dv.setUint32(2, out.length, true); dv.setUint32(10, 62, true);
+  dv.setUint32(14, 40, true); dv.setInt32(18, IMG_W, true); dv.setInt32(22, IMG_H, true);
+  dv.setUint16(26, 1, true); dv.setUint16(28, 1, true); dv.setUint32(34, dataLen + 2, true);
+  dv.setInt32(38, 2834, true); dv.setInt32(42, 2834, true);
+  out.set([0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00], 54);  // 0=白, 1=黒
+  for (let y = 0; y < IMG_H; y++) {
+    const row = 62 + (IMG_H - 1 - y) * rowBytes;
+    for (let x = 0; x < IMG_W; x++) {
+      const lit = px[(y * IMG_W + x) * 4] > 110;
+      if (!lit) out[row + (x >> 3)] |= 0x80 >> (x & 7);
+    }
+  }
+  return out;
+}
+
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(bytes) { let c = 0xffffffff; for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+
+async function sendImageSide(side, bmp) {
+  const t0 = performance.now();
+  for (let i = 0, idx = 0; i < bmp.length; i += 194, idx++) {
+    const head = idx === 0 ? [0x15, idx & 0xff, 0x00, 0x1c, 0x00, 0x00] : [0x15, idx & 0xff];
+    const pkt = new Uint8Array(head.length + Math.min(194, bmp.length - i));
+    pkt.set(head); pkt.set(bmp.subarray(i, i + 194), head.length);
+    if (!(await writeSide(side, pkt))) return false;
+  }
+  let ok = false;
+  for (let r = 0; r < 5 && !ok; r++) {
+    const w = waitResp(side, 0x20, 3000);
+    await writeSide(side, Uint8Array.from([0x20, 0x0d, 0x0e]));
+    const resp = await w;
+    if (resp) { ok = resp[1] === 0xc9; if (!ok) { log(`${side} 画像の受信に失敗: ${hex(resp)}`); return false; } }
+  }
+  if (!ok) { log(`${side} 画像の完了応答がありません`); return false; }
+  const all = new Uint8Array(4 + bmp.length); all.set([0x00, 0x1c, 0x00, 0x00]); all.set(bmp, 4);
+  const v = crc32(all);
+  const w = waitResp(side, 0x16, 3000);
+  await writeSide(side, Uint8Array.from([0x16, v >>> 24, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff]));
+  const resp = await w;
+  const good = resp && !(resp.length > 5 && resp[5] !== 0xc9);
+  log(`${side} 画像送信 ${good ? "成功" : "失敗"}（${Math.round(performance.now() - t0)}ms${resp ? " 応答 " + hex(resp) : ""}）`);
+  return good;
+}
+async function sendImage(bmp) {
+  if (!sides.L && !sides.R) return;
+  hbPaused = true;
+  try {
+    // 左右は別々に送れる（公式デモも並列に送っている）
+    await Promise.all(["L", "R"].filter((s) => sides[s]).map((s) => sendImageSide(s, bmp)));
+  } finally { hbPaused = false; }
+}
+
+async function stDraw() {
+  if (currentApp !== "stars") return;
+  if (stBusy) { stAgain = true; return; }
+  stBusy = true;
+  try {
+    if (typeof Astronomy === "undefined" || !(await stLoad())) {
+      show(center(["Star map", "", "Could not load star data", "(check your connection)"]));
+      return;
+    }
+    const canvas = $("stCanvas");
+    stRender(canvas);
+    renderControls();
+    lastScreen = { canvas: true };
+    $("hud").innerHTML = "";
+    const img = new Image(); img.src = canvas.toDataURL(); img.alt = "メガネに送る星座図"; img.className = "hud-img";
+    $("hud").append(img);
+    stLastBmp = canvasToBmp(canvas);
+    stLastSent = Date.now();
+    await sendImage(stLastBmp);
+  } finally {
+    stBusy = false;
+    if (stAgain) { stAgain = false; stDraw(); }
+  }
+}
+let stLastBmp = null;
+function stTurn(dAz, dAlt) {
+  stAz = (stAz + dAz + 360) % 360;
+  stAltIdx = (stAltIdx + dAlt + ST_ALTS.length) % ST_ALTS.length;
+  store.set("stAz", stAz); store.set("stAltIdx", stAltIdx);
+  stDraw();
+}
+Object.assign(byId.stars, {
+  enter() {
+    show(center(["Star map", "", "Loading..."]));
+    stDraw();
+    clearInterval(stTimer);
+    stTimer = setInterval(() => { if (currentApp === "stars") { if (Date.now() - stLastSent > 110e3) stDraw(); } else clearInterval(stTimer); }, 30e3);
+  },
+  tap(side) { side === "R" ? stTurn(45, 0) : stTurn(0, 1); },
+  action(ev) { if (ev === "left") stTurn(-45, 0); if (ev === "down") stTurn(0, -1); },
+  buttons() {
+    return [["上を見る（左）", "", "L"], ["右へ45°（右）", "primary", "R"], ["下を見る", "small", "down"], ["左へ45°", "small", "left"]];
+  },
+  status() { return `${DIRS_JA[dirIdx(stAz)]}・高さ${ST_ALTS[stAltIdx]}°`; },
 });
 
 /* ================= ポモドーロ ================= */
@@ -976,7 +1399,8 @@ $("connL").onclick = () => connect("L");
 $("connR").onclick = () => connect("R");
 bindReset();
 renderDecks();
-tpInit(); pomoInit(); tdRender();
+skyInit(); pomoInit(); tdRender();
+$("stNames").addEventListener("change", () => stDraw());
 renderHome();
 goHome();
 autoConnect();
