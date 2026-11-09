@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1512">
+<title>G1 単語帳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+1+Code:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* Layout: one narrow column — status bar, the glasses' HUD mirror, big thumb buttons, then deck tools below */
+:root {
+  --bg: #eef1ee;
+  --surface: #ffffff;
+  --fg: #18201c;
+  --muted: #5d6a63;
+  --line: #d3dad5;
+  --accent: #1f7a4d;
+  --accent-fg: #ffffff;
+  --hud-bg: #07110b;
+  --hud-fg: #5cf08f;
+  --hud-dim: #2c6b43;
+  --again: #b4472f;
+  --again-bg: #f6e3de;
+  --ok-bg: #dcefe3;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --font-hud: "M PLUS 1 Code", ui-monospace, "Noto Sans Mono CJK JP", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1512; --surface: #18201c; --fg: #e4ebe6; --muted: #93a39a; --line: #2b3630;
+    --accent: #43b97a; --accent-fg: #06120b; --again: #e98a72; --again-bg: #3a221c; --ok-bg: #173826;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1512; --surface: #18201c; --fg: #e4ebe6; --muted: #93a39a; --line: #2b3630;
+  --accent: #43b97a; --accent-fg: #06120b; --again: #e98a72; --again-bg: #3a221c; --ok-bg: #173826;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body {
+  background: var(--bg); color: var(--fg); font: 15px/1.6 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 32px;
+}
+main { max-width: 560px; margin: 0 auto; display: grid; gap: 18px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 1.25rem; margin: 0; letter-spacing: .02em; }
+h2 { font-size: .8rem; margin: 0 0 8px; color: var(--muted); letter-spacing: .08em; font-weight: 500; }
+.pills { display: flex; gap: 6px; }
+.pill {
+  font: 600 .75rem var(--font-hud); padding: 3px 10px; border-radius: 99px;
+  border: 1px solid var(--line); color: var(--muted); background: var(--surface);
+}
+.pill.on { background: var(--ok-bg); color: var(--accent); border-color: var(--accent); }
+
+/* the HUD mirror */
+.hud-wrap { display: grid; gap: 6px; }
+.hud {
+  background: var(--hud-bg); color: var(--hud-fg); border-radius: 14px;
+  padding: 14px 16px; font: 500 clamp(13px, 3.6vw, 16px)/1.55 var(--font-hud);
+  min-height: calc(5 * 1.55em + 28px); overflow: hidden;
+  text-shadow: 0 0 6px rgba(92, 240, 143, .35);
+}
+.hud div { white-space: pre; overflow: hidden; text-overflow: clip; min-height: 1.55em; }
+.hud-meta { display: flex; justify-content: space-between; font: .72rem var(--font-hud); color: var(--muted); }
+
+.controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+button, .btn {
+  font: 500 1rem var(--font-body); border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg); padding: 12px 14px; cursor: pointer;
+  min-height: 48px; touch-action: manipulation;
+}
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: default; }
+.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.big { grid-column: 1 / -1; font-size: 1.1rem; min-height: 64px; font-weight: 700; }
+.again { background: var(--again-bg); color: var(--again); border-color: transparent; min-height: 64px; font-weight: 700; }
+.known { background: var(--ok-bg); color: var(--accent); border-color: transparent; min-height: 64px; font-weight: 700; }
+.small { font-size: .85rem; min-height: 40px; padding: 8px 12px; }
+.wide { grid-column: 1 / -1; }
+
+section.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > * { flex: 1 1 auto; }
+label { font-size: .85rem; color: var(--muted); }
+select, input[type=number], textarea {
+  font: 1rem var(--font-body); color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px; width: 100%;
+}
+textarea { min-height: 96px; font-family: var(--font-hud); font-size: .85rem; }
+.check { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--fg); }
+.note { font-size: .82rem; color: var(--muted); margin: 0; }
+.warn { background: var(--again-bg); color: var(--again); border-radius: 10px; padding: 10px 12px; font-size: .88rem; margin: 0; }
+.boxes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; font: .72rem var(--font-hud); text-align: center; font-variant-numeric: tabular-nums; }
+.boxes div { background: var(--bg); border-radius: 8px; padding: 6px 2px; }
+.boxes b { display: block; font-size: 1rem; color: var(--fg); }
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.log { font: .75rem var(--font-hud); color: var(--muted); max-height: 7em; overflow: auto; white-space: pre-wrap; margin: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>G1 単語帳</h1>
+    <div class="pills" aria-live="polite">
+      <span class="pill" id="pillL">L 未接続</span>
+      <span class="pill" id="pillR">R 未接続</span>
+    </div>
+  </header>
+
+  <p class="warn" id="noBle" hidden>このブラウザは Bluetooth に対応していません。Android の Chrome で開いてください。メガネなしでも、この画面だけで練習できます。</p>
+
+  <section class="panel" id="connectPanel">
+    <h2>メガネに接続</h2>
+    <p class="note">先にスマホの Even アプリを強制停止してください。ボタンを押すと機器の一覧が出るので、名前に <b>_L_</b>（左）または <b>_R_</b>（右）が入ったものを選びます。</p>
+    <div class="row">
+      <button class="primary" id="connL">左（L）を接続</button>
+      <button class="primary" id="connR">右（R）を接続</button>
+    </div>
+    <label class="check"><input type="checkbox" id="wake" checked> 練習中は画面をつけたままにする</label>
+  </section>
+
+  <div class="hud-wrap">
+    <div class="hud" id="hud" aria-live="polite" aria-label="メガネの表示"></div>
+    <div class="hud-meta"><span>メガネの表示（5行）</span><span id="progressText"></span></div>
+  </div>
+
+  <div class="controls" id="controls">
+    <button class="big primary" id="startBtn">練習をはじめる</button>
+  </div>
+
+  <section class="panel">
+    <h2>単語帳</h2>
+    <div class="row">
+      <select id="deckSel" aria-label="単語帳を選ぶ"></select>
+    </div>
+    <div class="boxes" id="boxes" aria-label="覚え具合"></div>
+    <p class="note">box 1 = 苦手 … box 5 = 完璧。苦手なカードから先に出ます。</p>
+    <div class="row">
+      <div><label for="count">1回の枚数</label><input type="number" id="count" min="1" max="200" value="20"></div>
+      <label class="check"><input type="checkbox" id="reverse"> 答え→問題の順で出す</label>
+    </div>
+    <div class="confirm" id="resetArea">
+      <button class="small" id="resetBtn">進み具合をリセット</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>単語帳を追加</h2>
+    <p class="note">1行に「問題,答え,メモ」の形で書きます（メモは省略可）。CSV ファイルも読み込めます。</p>
+    <div class="row"><input type="text" id="newName" placeholder="単語帳の名前" aria-label="単語帳の名前" style="font:1rem var(--font-body);padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></div>
+    <textarea id="csvText" placeholder="apple,りんご,an apple a day&#10;run,走る"></textarea>
+    <div class="row">
+      <button id="addText">貼り付けた内容で追加</button>
+      <label class="btn small" style="text-align:center">CSV を読み込む<input type="file" id="csvFile" accept=".csv,.txt,text/csv,text/plain" hidden></label>
+    </div>
+    <div class="confirm" id="deleteArea"></div>
+    <p class="note" id="addMsg" aria-live="polite"></p>
+  </section>
+
+  <section class="panel">
+    <h2>接続ログ</h2>
+    <pre class="log" id="log"></pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* ================= Even G1 BLE ================= */
+const UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const TX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const LINE_WIDTH = 38, LINES = 5, CHUNK = 180;
+const sides = { L: null, R: null };      // { device, tx }
+let seq = 0, writeChain = Promise.resolve(), hbTimer = null, hbN = 0;
+
+const $ = (id) => document.getElementById(id);
+function log(msg) {
+  const el = $("log");
+  const t = new Date().toLocaleTimeString("ja-JP", { hour12: false });
+  el.textContent = (`${t} ${msg}\n` + el.textContent).slice(0, 4000);
+}
+
+const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+const cw = (ch) => (WIDE.test(ch) ? 2 : 1);
+const tw = (s) => [...s].reduce((a, c) => a + cw(c), 0);
+
+function wrap(text, width = LINE_WIDTH) {
+  const out = [];
+  for (const para of String(text).split("\n")) {
+    const tokens = para.match(/[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[^\sᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]+\s*|\s+/g) || [""];
+    let cur = "";
+    for (const tok of tokens) {
+      if (tw(cur + tok) <= width) { cur += tok; continue; }
+      if (cur.trim()) out.push(cur.trimEnd());
+      cur = tok.trimStart();
+      while (tw(cur) > width) {
+        let w = 0, i = 0; const chars = [...cur];
+        while (w + cw(chars[i]) <= width) { w += cw(chars[i]); i++; }
+        out.push(chars.slice(0, i).join("")); cur = chars.slice(i).join("");
+      }
+    }
+    out.push(cur.trimEnd());
+  }
+  return out;
+}
+
+function splitUtf8(str, limit) {
+  const enc = new TextEncoder(), chunks = []; let cur = [];
+  for (const ch of str) {
+    const b = enc.encode(ch);
+    if (cur.length + b.length > limit) { chunks.push(Uint8Array.from(cur)); cur = []; }
+    cur.push(...b);
+  }
+  chunks.push(Uint8Array.from(cur));
+  return chunks;
+}
+
+function sendBoth(bytes) {
+  // 公式仕様: 左 → 右の順に送る。送信は1つずつ順番に。
+  writeChain = writeChain.then(async () => {
+    for (const s of ["L", "R"]) {
+      const c = sides[s];
+      if (!c || !c.device.gatt.connected) continue;
+      try { await c.tx.writeValueWithResponse(bytes); }
+      catch (e) { log(`${s} 送信失敗: ${e.message}`); }
+    }
+  });
+  return writeChain;
+}
+
+async function showOnGlasses(lines) {
+  if (!sides.L && !sides.R) return;
+  const chunks = splitUtf8(lines.slice(0, LINES).join("\n"), CHUNK);
+  seq = (seq + 1) & 0xff;
+  for (let i = 0; i < chunks.length; i++) {
+    const pkt = new Uint8Array(9 + chunks[i].length);
+    pkt.set([0x4e, seq, chunks.length, i, 0x71, 0, 0, 1, 1]);
+    pkt.set(chunks[i], 9);
+    await sendBoth(pkt);
+  }
+}
+
+function startHeartbeat() {
+  if (hbTimer) return;
+  hbTimer = setInterval(() => {
+    hbN = (hbN + 1) & 0xff;
+    sendBoth(Uint8Array.from([0x25, 6, 0, hbN, 4, hbN]));
+  }, 8000);
+}
+
+async function connect(wantSide) {
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: "Even" }, { namePrefix: "G1" }],
+      optionalServices: [UART],
+    });
+    const name = device.name || "";
+    const side = name.includes("_L_") ? "L" : name.includes("_R_") ? "R" : wantSide;
+    if (side !== wantSide) log(`${name} は ${side} 側なので ${side} として接続します`);
+    await attach(side, device);
+    device.addEventListener("gattserverdisconnected", () => onDisconnect(side, device));
+  } catch (e) {
+    if (e.name !== "NotFoundError") log(`接続エラー: ${e.message}`);
+  }
+}
+
+async function attach(side, device) {
+  log(`${side} 接続中: ${device.name}`);
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(UART);
+  const tx = await svc.getCharacteristic(TX);
+  const rx = await svc.getCharacteristic(RX);
+  await rx.startNotifications();
+  rx.addEventListener("characteristicvaluechanged", (ev) => onNotify(side, new Uint8Array(ev.target.value.buffer)));
+  sides[side] = { device, tx };
+  setPill(side, true);
+  log(`${side} 接続しました`);
+  startHeartbeat();
+  if (lastScreen) showOnGlasses(lastScreen);
+}
+
+async function onDisconnect(side, device) {
+  setPill(side, false);
+  log(`${side} が切断されました。再接続します…`);
+  for (let i = 0; i < 3; i++) {
+    try { await attach(side, device); return; }
+    catch (e) { await new Promise((r) => setTimeout(r, 3000)); }
+  }
+  sides[side] = null;
+  log(`${side} に再接続できませんでした。もう一度「接続」を押してください`);
+}
+
+function setPill(side, on) {
+  const el = $("pill" + side);
+  el.classList.toggle("on", on);
+  el.textContent = `${side} ${on ? "接続中" : "未接続"}`;
+}
+
+function onNotify(side, d) {
+  if (d[0] !== 0xf5) return;
+  if (d[1] === 0x00) act("quit");
+  else if (d[1] === 0x01) act(mode === "answer" ? (side === "R" ? "known" : "again") : mode === "question" ? "flip" : "start");
+}
+
+/* ================= 単語帳 ================= */
+const SAMPLE = `abandon,見捨てる・放棄する,They abandoned the plan.
+accurate,正確な,an accurate report
+achieve,達成する,achieve a goal
+acquire,習得する・獲得する,acquire a new skill
+adequate,十分な・適切な,adequate sleep
+anticipate,予期する,We anticipate delays.
+approximately,およそ,approximately 10 minutes
+assume,想定する・思い込む,Don't assume anything.
+available,利用できる・手が空いている,Are you available now?
+consequence,結果・影響,face the consequences
+considerable,かなりの,a considerable amount
+convenient,便利な・都合のよい,a convenient time
+crucial,極めて重要な,a crucial decision
+decline,断る・減少する,decline an offer
+demonstrate,実演する・証明する,demonstrate how it works
+efficient,効率的な,an efficient method
+emphasize,強調する,emphasize the point
+essential,不可欠な,essential information
+evaluate,評価する,evaluate the results
+fundamental,基本的な,fundamental rights
+hesitate,ためらう,Don't hesitate to ask.
+inevitable,避けられない,an inevitable change
+maintain,維持する,maintain good health
+obvious,明らかな,an obvious mistake
+occasionally,時々,I occasionally cook.
+priority,優先事項,Safety is our priority.
+reluctant,気が進まない,reluctant to leave
+significant,重要な・かなりの,a significant change
+sufficient,十分な,sufficient evidence
+temporary,一時的な,a temporary job`;
+
+function parseCsv(text) {
+  const rows = [];
+  for (const raw of text.replace(/^﻿/, "").split(/\r?\n/)) {
+    if (!raw.trim() || raw.startsWith("#")) continue;
+    const cells = []; let cur = "", q = false;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (q) { if (ch === '"' && raw[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ",") { cells.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    cells.push(cur);
+    const [f = "", b = "", n = ""] = cells.map((c) => c.trim());
+    if (f) rows.push([f, b, n]);
+  }
+  return rows;
+}
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("g1fc:" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("g1fc:" + k, JSON.stringify(v)); } catch {} },
+};
+let decks = store.get("decks", null);
+if (!decks || !decks.sample) decks = { sample: { name: "英単語 30（サンプル）", cards: parseCsv(SAMPLE) }, ...(decks || {}) };
+let deckId = store.get("deckId", "sample");
+if (!decks[deckId]) deckId = "sample";
+
+const progressOf = (id) => store.get("progress:" + id, {});
+const MAX_BOX = 5;
+
+function renderDecks() {
+  const sel = $("deckSel");
+  sel.innerHTML = "";
+  for (const [id, d] of Object.entries(decks)) {
+    const o = document.createElement("option");
+    o.value = id; o.textContent = `${d.name}（${d.cards.length}枚）`;
+    sel.append(o);
+  }
+  sel.value = deckId;
+  renderBoxes();
+  renderDelete();
+}
+function renderBoxes() {
+  const p = progressOf(deckId), counts = [0, 0, 0, 0, 0];
+  for (const [f] of decks[deckId].cards) counts[(p[f] || 1) - 1]++;
+  $("boxes").innerHTML = counts.map((c, i) => `<div>box ${i + 1}<b>${c}</b></div>`).join("");
+}
+function renderDelete() {
+  const area = $("deleteArea");
+  area.innerHTML = "";
+  if (deckId === "sample") return;
+  const btn = document.createElement("button");
+  btn.className = "small"; btn.textContent = `「${decks[deckId].name}」を削除`;
+  btn.onclick = () => confirmInline(area, "削除しますか？元に戻せません。", () => {
+    delete decks[deckId]; store.set("decks", decks);
+    try { localStorage.removeItem("g1fc:progress:" + deckId); } catch {}
+    deckId = "sample"; store.set("deckId", deckId); renderDecks();
+  }, renderDelete);
+  area.append(btn);
+}
+function confirmInline(area, text, onYes, onNo) {
+  area.innerHTML = `<span class="note">${text}</span>`;
+  const y = document.createElement("button"); y.className = "small"; y.textContent = "はい";
+  const n = document.createElement("button"); n.className = "small"; n.textContent = "やめる";
+  y.onclick = onYes; n.onclick = onNo;
+  area.append(y, n);
+}
+
+$("deckSel").onchange = (e) => { deckId = e.target.value; store.set("deckId", deckId); renderBoxes(); renderDelete(); };
+function restoreReset() {
+  $("resetArea").innerHTML = '<button class="small" id="resetBtn">進み具合をリセット</button>';
+  bindReset();
+}
+function bindReset() {
+  $("resetBtn").onclick = () => confirmInline($("resetArea"), "この単語帳の進み具合を消しますか？", () => {
+    try { localStorage.removeItem("g1fc:progress:" + deckId); } catch {}
+    restoreReset(); renderBoxes();
+  }, restoreReset);
+}
+
+function addDeck(name, text) {
+  const cards = parseCsv(text);
+  if (!cards.length) { $("addMsg").textContent = "カードが読み取れませんでした。「問題,答え」の形になっているか確認してください。"; return; }
+  const id = "d" + Date.now();
+  decks[id] = { name: name || `単語帳 ${Object.keys(decks).length}`, cards };
+  store.set("decks", decks);
+  deckId = id; store.set("deckId", id);
+  renderDecks();
+  $("addMsg").textContent = `「${decks[id].name}」を追加しました（${cards.length}枚）。`;
+}
+$("addText").onclick = () => { addDeck($("newName").value.trim(), $("csvText").value); $("csvText").value = ""; };
+$("csvFile").onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  addDeck($("newName").value.trim() || f.name.replace(/\.[^.]+$/, ""), await f.text());
+  e.target.value = "";
+};
+
+/* ================= 練習 ================= */
+let mode = "idle", pending = [], current = null, total = 0, done = 0, known = 0, again = 0, lastScreen = null, wakeLock = null;
+
+function center(lines, h = LINES) {
+  lines = lines.slice(0, h);
+  const top = Math.floor((h - lines.length) / 2);
+  return [...Array(top).fill(""), ...lines, ...Array(h - lines.length - top).fill("")];
+}
+async function show(lines) {
+  lastScreen = lines;
+  $("hud").innerHTML = "";
+  for (const l of [...lines, "", "", "", "", ""].slice(0, LINES)) {
+    const d = document.createElement("div"); d.textContent = l; $("hud").append(d);
+  }
+  await showOnGlasses(lines);
+}
+
+function setControls() {
+  const c = $("controls");
+  c.innerHTML = "";
+  const b = (label, cls, ev) => { const x = document.createElement("button"); x.className = cls; x.textContent = label; x.onclick = () => act(ev); c.append(x); };
+  if (mode === "idle") b("練習をはじめる", "big primary", "start");
+  if (mode === "question") { b("答えを見る", "big primary", "flip"); b("まだ", "again", "again"); b("覚えた", "known", "known"); }
+  if (mode === "answer") { b("まだ（左）", "again", "again"); b("覚えた（右）", "known", "known"); }
+  if (mode !== "idle") b("終了", "small wide", "quit");
+  $("progressText").textContent = mode === "idle" ? "" : `${done}/${total}`;
+}
+
+function cardsForSession() {
+  const deck = decks[deckId].cards.map(([f, b, n]) => ({ f, b, n }));
+  const rev = $("reverse").checked;
+  const list = rev ? deck.map((c) => ({ f: c.b, b: c.f, n: c.n, key: c.f })) : deck.map((c) => ({ ...c, key: c.f }));
+  const p = progressOf(deckId);
+  for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+  list.sort((a, b) => (p[a.key] || 1) - (p[b.key] || 1));
+  return list.slice(0, Math.max(1, +$("count").value || 20));
+}
+
+async function nextCard() {
+  if (!pending.length) return finish();
+  current = pending.shift();
+  mode = "question"; setControls();
+  const box = progressOf(deckId)[current.key] || 1;
+  await show([`[${done + 1}/${total}]  box ${box}/${MAX_BOX}`, ...center(wrap(current.f).slice(0, 3), 4)]);
+}
+async function showAnswer() {
+  mode = "answer"; setControls();
+  let lines = [wrap(current.f)[0], ...wrap(current.b)];
+  if (current.n) lines.push(...wrap(current.n));
+  lines = lines.slice(0, 4);
+  while (lines.length < 4) lines.push("");
+  lines.push("L: again    R: got it");
+  await show(lines);
+}
+function grade(ok) {
+  const p = progressOf(deckId), box = p[current.key] || 1;
+  if (ok) { p[current.key] = Math.min(box + 1, MAX_BOX); known++; done++; }
+  else { p[current.key] = 1; again++; pending.splice(Math.min(3, pending.length), 0, current); }
+  store.set("progress:" + deckId, p);
+  renderBoxes();
+  nextCard();
+}
+async function finish() {
+  const p = progressOf(deckId);
+  const mastered = decks[deckId].cards.filter(([f]) => (p[f] || 1) >= MAX_BOX).length;
+  mode = "idle"; setControls();
+  await show(center(["Session finished!", `got it: ${known}   again: ${again}`, `mastered: ${mastered}/${decks[deckId].cards.length}`]));
+  releaseWake();
+}
+async function start() {
+  pending = cardsForSession(); total = pending.length; done = known = again = 0;
+  if ($("wake").checked) requestWake();
+  nextCard();
+}
+function act(ev) {
+  if (ev === "start" && mode === "idle") return start();
+  if (ev === "quit" && mode !== "idle") return finish();
+  if (ev === "flip" && mode === "question") return showAnswer();
+  if ((ev === "known" || ev === "again") && mode !== "idle") return grade(ev === "known");
+}
+
+async function requestWake() {
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
+}
+function releaseWake() { try { wakeLock && wakeLock.release(); } catch {} wakeLock = null; }
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && mode !== "idle" && $("wake").checked) requestWake(); });
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, select")) return;
+  const k = e.key;
+  if (k === " " || k === "Enter") { e.preventDefault(); act(mode === "idle" ? "start" : mode === "question" ? "flip" : "known"); }
+  else if (k === "ArrowRight") act("known");
+  else if (k === "ArrowLeft") act("again");
+  else if (k === "q" || k === "Escape") act("quit");
+});
+
+/* ================= 起動 ================= */
+if (!navigator.bluetooth) { $("noBle").hidden = false; $("connL").disabled = $("connR").disabled = true; }
+$("connL").onclick = () => connect("L");
+$("connR").onclick = () => connect("R");
+bindReset();
+renderDecks();
+setControls();
+show(center(["G1 Flashcards", "", "Tap to start"]));
+</script>
+</body>
+</html>
