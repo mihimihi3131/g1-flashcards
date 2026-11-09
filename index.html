@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1512">
-<title>G1 単語帳</title>
+<title>G1 アプリ集</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+1+Code:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
@@ -41,6 +41,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
 body {
@@ -103,29 +104,47 @@ textarea { min-height: 96px; font-family: var(--font-hud); font-size: .85rem; }
 .boxes b { display: block; font-size: 1rem; color: var(--fg); }
 .confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .log { font: .75rem var(--font-hud); color: var(--muted); max-height: 7em; overflow: auto; white-space: pre-wrap; margin: 0; }
+.tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.tab { flex: 0 0 auto; min-height: 38px; padding: 6px 14px; font-size: .9rem; border-radius: 99px; }
+.tab[aria-current="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.app-panel { display: grid; gap: 18px; }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.home-grid button { text-align: left; display: grid; gap: 2px; }
+.home-grid b { font-size: 1rem; }
+.home-grid span { font-size: .8rem; color: var(--muted); }
+.pomo-clock { font: 600 3rem/1 var(--font-hud); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.todo-list li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg); min-width: 0; }
+.todo-list li.cur { outline: 2px solid var(--accent); }
+.todo-list li span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.todo-list li.done span { text-decoration: line-through; color: var(--muted); }
+.todo-list input { width: 22px; height: 22px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>G1 単語帳</h1>
+    <h1>G1 アプリ集</h1>
     <div class="pills" aria-live="polite">
       <span class="pill" id="pillL">L 未接続</span>
       <span class="pill" id="pillR">R 未接続</span>
     </div>
   </header>
+  <nav class="tabs" id="tabs" aria-label="アプリを切り替える"></nav>
 
-  <p class="warn" id="noBle" hidden>このブラウザは Bluetooth に対応していません。Android の Chrome で開いてください。メガネなしでも、この画面だけで練習できます。</p>
+  <p class="warn" id="noBle" hidden>このブラウザでは Bluetooth が使えません。<b>Android の Chrome</b> で開いてください。LINE や Claude などのアプリの中で開いている場合は、右上のメニューから「Chrome で開く」を選んでください。メガネなしでも、この画面だけで使えます。</p>
 
   <section class="panel" id="connectPanel">
     <h2>メガネに接続</h2>
-    <p class="note">先にスマホの Even アプリを強制停止してください。ボタンを押すと機器の一覧が出るので、名前に <b>_L_</b>（左）または <b>_R_</b>（右）が入ったものを選びます。</p>
+    <p class="note">先にスマホの Even アプリを強制停止してください。ボタンを押すと機器の一覧が出るので、名前に <b>_L_</b>（左）または <b>_R_</b>（右）が入ったものを選びます。一度つなげば、次からはこのページを開くだけで自動でつながり、あとはメガネのタップだけで操作できます（ホームでは 左タップ＝次のアプリ、右タップ＝開く、アプリの中でダブルタップ＝ホームに戻る）。</p>
     <div class="row">
       <button class="primary" id="connL">左（L）を接続</button>
       <button class="primary" id="connR">右（R）を接続</button>
     </div>
-    <label class="check"><input type="checkbox" id="wake" checked> 練習中は画面をつけたままにする</label>
+    <p class="warn" id="connMsg" hidden></p>
+    <label class="check"><input type="checkbox" id="showAll"> 一覧にすべての機器を出す（G1 が出てこないとき）</label>
+    <label class="check"><input type="checkbox" id="wake" checked> メガネとつながっている間は画面をつけたままにする</label>
   </section>
 
   <div class="hud-wrap">
@@ -133,9 +152,16 @@ textarea { min-height: 96px; font-family: var(--font-hud); font-size: .85rem; }
     <div class="hud-meta"><span>メガネの表示（5行）</span><span id="progressText"></span></div>
   </div>
 
-  <div class="controls" id="controls">
-    <button class="big primary" id="startBtn">練習をはじめる</button>
+  <div class="controls" id="controls"></div>
+
+  <div class="app-panel" data-app="home">
+    <section class="panel">
+      <h2>アプリ</h2>
+      <div class="home-grid" id="homeGrid"></div>
+    </section>
   </div>
+
+  <div class="app-panel" data-app="cards">
 
   <section class="panel">
     <h2>単語帳</h2>
@@ -165,6 +191,47 @@ textarea { min-height: 96px; font-family: var(--font-hud); font-size: .85rem; }
     <div class="confirm" id="deleteArea"></div>
     <p class="note" id="addMsg" aria-live="polite"></p>
   </section>
+
+  </div>
+
+  <div class="app-panel" data-app="prompter">
+    <section class="panel">
+      <h2>原稿</h2>
+      <p class="note">メガネには5行ずつ表示します。右タップで次、左タップで前のページです。空行で段落を分けられます。</p>
+      <textarea id="tpText" aria-label="原稿" style="min-height:220px"></textarea>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="tpAuto"> 自動で送る</label>
+        <div><label for="tpSec">1ページの秒数</label><input type="number" id="tpSec" min="2" max="120" value="8"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="app-panel" data-app="pomo">
+    <section class="panel">
+      <h2>ポモドーロタイマー</h2>
+      <div class="pomo-clock" id="pmClock" aria-live="off">25:00</div>
+      <p class="note" id="pmState"></p>
+      <div class="row">
+        <div><label for="pmFocus">集中（分）</label><input type="number" id="pmFocus" min="1" max="120" value="25"></div>
+        <div><label for="pmBreak">休憩（分）</label><input type="number" id="pmBreak" min="1" max="60" value="5"></div>
+        <div><label for="pmLong">長い休憩（分）</label><input type="number" id="pmLong" min="1" max="60" value="15"></div>
+      </div>
+      <p class="note">4回集中するごとに長い休憩になります。時間になるとスマホが振動し、次の時間が自動で始まります。</p>
+      <div class="confirm"><button class="small" id="pmReset">最初からやり直す</button></div>
+    </section>
+  </div>
+
+  <div class="app-panel" data-app="todo">
+    <section class="panel">
+      <h2>ToDo</h2>
+      <form class="row" id="tdForm">
+        <input type="text" id="tdNew" placeholder="やることを入力" aria-label="やること" style="font:1rem var(--font-body);padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);flex:1 1 60%">
+        <button class="primary" type="submit">追加</button>
+      </form>
+      <ul class="todo-list" id="tdList"></ul>
+      <div class="confirm"><button class="small" id="tdClear">完了したものを消す</button></div>
+    </section>
+  </div>
 
   <section class="panel">
     <h2>接続ログ</h2>
@@ -259,17 +326,19 @@ function startHeartbeat() {
 
 async function connect(wantSide) {
   try {
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: "Even" }, { namePrefix: "G1" }],
-      optionalServices: [UART],
-    });
+    connMsg("");
+    log(`${wantSide} の機器一覧を開きます`);
+    const opts = $("showAll").checked
+      ? { acceptAllDevices: true, optionalServices: [UART] }
+      : { filters: [{ namePrefix: "Even" }, { namePrefix: "G1" }], optionalServices: [UART] };
+    const device = await navigator.bluetooth.requestDevice(opts);
     const name = device.name || "";
     const side = name.includes("_L_") ? "L" : name.includes("_R_") ? "R" : wantSide;
     if (side !== wantSide) log(`${name} は ${side} 側なので ${side} として接続します`);
     await attach(side, device);
-    device.addEventListener("gattserverdisconnected", () => onDisconnect(side, device));
   } catch (e) {
-    if (e.name !== "NotFoundError") log(`接続エラー: ${e.message}`);
+    log(`接続エラー: ${e.name}: ${e.message}`);
+    connMsg(explain(e));
   }
 }
 
@@ -282,14 +351,54 @@ async function attach(side, device) {
   await rx.startNotifications();
   rx.addEventListener("characteristicvaluechanged", (ev) => onNotify(side, new Uint8Array(ev.target.value.buffer)));
   sides[side] = { device, tx };
+  if (!device._g1Listen) {
+    device._g1Listen = true;
+    device.addEventListener("gattserverdisconnected", () => onDisconnect(side, device));
+  }
   setPill(side, true);
   log(`${side} 接続しました`);
   startHeartbeat();
+  if ($("wake").checked) requestWake();
+  if (sides.L && sides.R) { connMsg(""); $("connectPanel").hidden = true; }
   if (lastScreen) showOnGlasses(lastScreen);
+}
+
+/* 一度つないだメガネに、開いたときに自動でつなぐ */
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
+async function autoConnect() {
+  if (!navigator.bluetooth || !navigator.bluetooth.getDevices) {
+    log("この Chrome では自動接続が使えません（毎回ボタンで接続してください）");
+    return;
+  }
+  let devs = [];
+  try { devs = await navigator.bluetooth.getDevices(); } catch (e) { log("自動接続: " + e.message); return; }
+  if (!devs.length) { log("自動接続: まだ接続したことのあるメガネがありません"); return; }
+  for (const dev of devs) {
+    const name = dev.name || "";
+    const side = name.includes("_L_") ? "L" : name.includes("_R_") ? "R" : null;
+    if (!side || sides[side]) continue;
+    tryAuto(side, dev);
+  }
+}
+async function tryAuto(side, dev) {
+  log(`自動接続を試します: ${side} ${dev.name}`);
+  try { await withTimeout(attach(side, dev), 12000); return; }
+  catch (e) { log(`${side} 自動接続できず（${e.message}）。電波を待ちます…`); }
+  if (!dev.watchAdvertisements) return;
+  try {
+    const onAdv = async () => {
+      dev.removeEventListener("advertisementreceived", onAdv);
+      try { await dev.unwatchAdvertisements?.(); } catch {}
+      try { await attach(side, dev); } catch (e) { log(`${side} 接続失敗: ${e.message}`); }
+    };
+    dev.addEventListener("advertisementreceived", onAdv);
+    await dev.watchAdvertisements();
+  } catch (e) { log(`${side} 電波の待ち受けができません: ${e.message}`); }
 }
 
 async function onDisconnect(side, device) {
   setPill(side, false);
+  $("connectPanel").hidden = false;
   log(`${side} が切断されました。再接続します…`);
   for (let i = 0; i < 3; i++) {
     try { await attach(side, device); return; }
@@ -307,8 +416,9 @@ function setPill(side, on) {
 
 function onNotify(side, d) {
   if (d[0] !== 0xf5) return;
-  if (d[1] === 0x00) act("quit");
-  else if (d[1] === 0x01) act(mode === "answer" ? (side === "R" ? "known" : "again") : mode === "question" ? "flip" : "start");
+  log(`タッチ ${side}: ${d[1]}`);
+  if (d[1] === 0x00) input("D");        // ダブルタップ
+  else if (d[1] === 0x01) input(side);  // 1回タップ
 }
 
 /* ================= 単語帳 ================= */
@@ -412,7 +522,7 @@ function confirmInline(area, text, onYes, onNo) {
   area.append(y, n);
 }
 
-$("deckSel").onchange = (e) => { deckId = e.target.value; store.set("deckId", deckId); renderBoxes(); renderDelete(); };
+$("deckSel").onchange = (e) => { deckId = e.target.value; store.set("deckId", deckId); renderBoxes(); renderDelete(); showMenu(); };
 function restoreReset() {
   $("resetArea").innerHTML = '<button class="small" id="resetBtn">進み具合をリセット</button>';
   bindReset();
@@ -432,6 +542,7 @@ function addDeck(name, text) {
   store.set("decks", decks);
   deckId = id; store.set("deckId", id);
   renderDecks();
+  showMenu();
   $("addMsg").textContent = `「${decks[id].name}」を追加しました（${cards.length}枚）。`;
 }
 $("addText").onclick = () => { addDeck($("newName").value.trim(), $("csvText").value); $("csvText").value = ""; };
@@ -441,13 +552,19 @@ $("csvFile").onchange = async (e) => {
   e.target.value = "";
 };
 
-/* ================= 練習 ================= */
-let mode = "idle", pending = [], current = null, total = 0, done = 0, known = 0, again = 0, lastScreen = null, wakeLock = null;
+/* ================= 共通の表示 ================= */
+let lastScreen = null, wakeLock = null, currentApp = null, homeCursor = 0;
 
 function center(lines, h = LINES) {
   lines = lines.slice(0, h);
   const top = Math.floor((h - lines.length) / 2);
   return [...Array(top).fill(""), ...lines, ...Array(h - lines.length - top).fill("")];
+}
+function fit(text, width = LINE_WIDTH) {
+  if (tw(text) <= width) return text;
+  let out = "", w = 0;
+  for (const ch of text) { if (w + cw(ch) > width - 2) break; out += ch; w += cw(ch); }
+  return out + "..";
 }
 async function show(lines) {
   lastScreen = lines;
@@ -458,17 +575,115 @@ async function show(lines) {
   await showOnGlasses(lines);
 }
 
-function setControls() {
-  const c = $("controls");
-  c.innerHTML = "";
-  const b = (label, cls, ev) => { const x = document.createElement("button"); x.className = cls; x.textContent = label; x.onclick = () => act(ev); c.append(x); };
-  if (mode === "idle") b("練習をはじめる", "big primary", "start");
-  if (mode === "question") { b("答えを見る", "big primary", "flip"); b("まだ", "again", "again"); b("覚えた", "known", "known"); }
-  if (mode === "answer") { b("まだ（左）", "again", "again"); b("覚えた（右）", "known", "known"); }
-  if (mode !== "idle") b("終了", "small wide", "quit");
-  $("progressText").textContent = mode === "idle" ? "" : `${done}/${total}`;
+/* ================= アプリの切り替え ================= */
+// 各アプリ: enter() 開いたとき / tap(side) 1回タップ / dbl() ダブルタップ（true を返すとホームに戻らない）
+//          buttons() スマホのボタン [表示, クラス, 入力] / status() 右下の表示 / action(ev) 独自ボタン
+const APPS = [
+  { id: "cards", name: "Flashcards", ja: "単語帳", desc: "タップでめくる暗記カード" },
+  { id: "prompter", name: "Teleprompter", ja: "プロンプター", desc: "原稿を5行ずつ表示" },
+  { id: "pomo", name: "Pomodoro", ja: "ポモドーロ", desc: "集中と休憩のタイマー" },
+  { id: "todo", name: "ToDo", ja: "ToDo", desc: "タップでチェックするリスト" },
+];
+const byId = Object.fromEntries(APPS.map((a) => [a.id, a]));
+
+function homeScreen() {
+  return ["G1 Apps        L: next   R: open", ...APPS.map((a, i) => (i === homeCursor ? "> " : "  ") + a.name)];
+}
+function goHome() {
+  currentApp = null;
+  renderChrome();
+  show(homeScreen());
+}
+function openApp(id) {
+  currentApp = id;
+  homeCursor = APPS.findIndex((a) => a.id === id);
+  renderChrome();
+  byId[id].enter();
+}
+function input(ev) {
+  const app = currentApp && byId[currentApp];
+  if (!app) {
+    if (ev === "R") return openApp(APPS[homeCursor].id);
+    if (ev === "L") { homeCursor = (homeCursor + 1) % APPS.length; renderControls(); show(homeScreen()); }
+    return;
+  }
+  if (ev === "D") { if (!(app.dbl && app.dbl())) goHome(); }
+  else if (ev === "L" || ev === "R") app.tap(ev);
+  else if (app.action) app.action(ev);
+  renderControls();
 }
 
+function renderChrome() {
+  const tabs = $("tabs");
+  tabs.innerHTML = "";
+  for (const [id, label] of [[null, "ホーム"], ...APPS.map((a) => [a.id, a.ja])]) {
+    const b = document.createElement("button");
+    b.className = "tab"; b.textContent = label;
+    b.setAttribute("aria-current", String(currentApp === id));
+    b.onclick = () => (id ? openApp(id) : goHome());
+    tabs.append(b);
+  }
+  document.querySelectorAll(".app-panel").forEach((el) => { el.hidden = el.dataset.app !== (currentApp || "home"); });
+  renderControls();
+}
+function renderControls() {
+  const c = $("controls");
+  c.innerHTML = "";
+  const app = currentApp && byId[currentApp];
+  const list = app ? app.buttons() : [["次のアプリ（左）", "", "L"], ["開く（右）", "primary", "R"]];
+  for (const [label, cls, ev] of list) {
+    const x = document.createElement("button");
+    x.className = cls; x.textContent = label; x.onclick = () => input(ev);
+    c.append(x);
+  }
+  if (app) {
+    const h = document.createElement("button");
+    h.className = "small wide"; h.textContent = "ホームに戻る（ダブルタップ）"; h.onclick = () => input("D");
+    c.append(h);
+  }
+  $("progressText").textContent = app && app.status ? app.status() : "";
+}
+function renderHome() {
+  const g = $("homeGrid");
+  g.innerHTML = "";
+  for (const a of APPS) {
+    const b = document.createElement("button");
+    b.innerHTML = `<b></b><span></span>`;
+    b.querySelector("b").textContent = a.ja;
+    b.querySelector("span").textContent = a.desc;
+    b.onclick = () => openApp(a.id);
+    g.append(b);
+  }
+}
+
+/* ================= 単語帳 ================= */
+let mode = "idle", pending = [], current = null, total = 0, done = 0, known = 0, again = 0;
+
+function menuScreen() {
+  const ids = Object.keys(decks), d = decks[deckId], p = progressOf(deckId);
+  const weak = d.cards.filter(([f]) => (p[f] || 1) === 1).length;
+  const mastered = d.cards.filter(([f]) => (p[f] || 1) >= MAX_BOX).length;
+  return [
+    `Flashcards   deck ${ids.indexOf(deckId) + 1}/${ids.length}`,
+    fit(d.name),
+    `${d.cards.length} cards  weak ${weak}  done ${mastered}`,
+    "",
+    "L: next deck    R: start",
+  ];
+}
+function showMenu() {
+  mode = "idle";
+  if (currentApp !== "cards") return;
+  renderControls();
+  show(menuScreen());
+}
+function nextDeck() {
+  const ids = Object.keys(decks);
+  deckId = ids[(ids.indexOf(deckId) + 1) % ids.length];
+  store.set("deckId", deckId);
+  renderDecks();
+  showMenu();
+}
 function cardsForSession() {
   const deck = decks[deckId].cards.map(([f, b, n]) => ({ f, b, n }));
   const rev = $("reverse").checked;
@@ -478,16 +693,15 @@ function cardsForSession() {
   list.sort((a, b) => (p[a.key] || 1) - (p[b.key] || 1));
   return list.slice(0, Math.max(1, +$("count").value || 20));
 }
-
 async function nextCard() {
   if (!pending.length) return finish();
   current = pending.shift();
-  mode = "question"; setControls();
+  mode = "question"; renderControls();
   const box = progressOf(deckId)[current.key] || 1;
   await show([`[${done + 1}/${total}]  box ${box}/${MAX_BOX}`, ...center(wrap(current.f).slice(0, 3), 4)]);
 }
 async function showAnswer() {
-  mode = "answer"; setControls();
+  mode = "answer"; renderControls();
   let lines = [wrap(current.f)[0], ...wrap(current.b)];
   if (current.n) lines.push(...wrap(current.n));
   lines = lines.slice(0, 4);
@@ -506,45 +720,266 @@ function grade(ok) {
 async function finish() {
   const p = progressOf(deckId);
   const mastered = decks[deckId].cards.filter(([f]) => (p[f] || 1) >= MAX_BOX).length;
-  mode = "idle"; setControls();
-  await show(center(["Session finished!", `got it: ${known}   again: ${again}`, `mastered: ${mastered}/${decks[deckId].cards.length}`]));
-  releaseWake();
+  mode = "summary"; renderControls();
+  await show(["Session finished!", `got it: ${known}   again: ${again}`, `mastered: ${mastered}/${decks[deckId].cards.length}`, "", "Tap: menu"]);
 }
-async function start() {
+function startCards() {
   pending = cardsForSession(); total = pending.length; done = known = again = 0;
-  if ($("wake").checked) requestWake();
   nextCard();
 }
-function act(ev) {
-  if (ev === "start" && mode === "idle") return start();
-  if (ev === "quit" && mode !== "idle") return finish();
-  if (ev === "flip" && mode === "question") return showAnswer();
-  if ((ev === "known" || ev === "again") && mode !== "idle") return grade(ev === "known");
+Object.assign(byId.cards, {
+  enter() { if (mode === "question") nextCardRedraw(); else if (mode === "answer") showAnswer(); else showMenu(); },
+  tap(side) {
+    if (mode === "idle") return side === "R" ? startCards() : nextDeck();
+    if (mode === "summary") return showMenu();
+    if (mode === "question") return showAnswer();
+    if (mode === "answer") return grade(side === "R");
+  },
+  dbl() { if (mode === "question" || mode === "answer") { finish(); return true; } return false; },
+  buttons() {
+    if (mode === "idle") return [["次の単語帳（左）", "", "L"], ["練習をはじめる（右）", "primary", "R"]];
+    if (mode === "question") return [["答えを見る", "big primary", "R"]];
+    if (mode === "answer") return [["まだ（左）", "again", "L"], ["覚えた（右）", "known", "R"], ["練習を終える", "small wide", "D"]];
+    return [["メニューに戻る", "big primary", "R"]];
+  },
+  status() { return mode === "question" || mode === "answer" ? `${done}/${total}` : ""; },
+});
+function nextCardRedraw() {
+  const box = progressOf(deckId)[current.key] || 1;
+  renderControls();
+  show([`[${done + 1}/${total}]  box ${box}/${MAX_BOX}`, ...center(wrap(current.f).slice(0, 3), 4)]);
 }
 
+/* ================= テレプロンプター ================= */
+const TP_SAMPLE = `皆さん、こんにちは。今日は「スマートグラスで毎日5分の勉強」についてお話しします。
+
+通勤中や家事の合間に、目の前に単語カードが出てきたら便利だと思いませんか。
+
+このアプリでは、メガネのタッチバーをタップするだけでページを送れます。右をタップすると次へ、左をタップすると前に戻ります。
+
+最後まで聞いていただき、ありがとうございました。`;
+let tpPage = 0, tpTimer = null;
+
+function tpPages() {
+  const lines = wrap(($("tpText").value || "").trim());
+  const pages = [];
+  for (let i = 0; i < lines.length; i += LINES) pages.push(lines.slice(i, i + LINES));
+  return pages.length && $("tpText").value.trim() ? pages : [center(["(no script)", "", "Write it on your phone"])];
+}
+function tpShow() {
+  const pages = tpPages();
+  tpPage = Math.max(0, Math.min(tpPage, pages.length - 1));
+  if (currentApp === "prompter") { renderControls(); show(pages[tpPage]); }
+}
+function tpGo(d) { tpPage += d; tpShow(); }
+function tpStop() { clearInterval(tpTimer); tpTimer = null; }
+function tpToggleAuto() {
+  if (tpTimer) return tpStop();
+  const sec = Math.max(2, +$("tpSec").value || 8);
+  tpTimer = setInterval(() => {
+    if (currentApp !== "prompter") return;
+    if (tpPage >= tpPages().length - 1) { tpStop(); renderControls(); return; }
+    tpGo(1);
+  }, sec * 1000);
+}
+function tpInit() {
+  $("tpText").value = store.get("tpText", TP_SAMPLE);
+  $("tpSec").value = store.get("tpSec", 8);
+  $("tpText").addEventListener("input", () => { store.set("tpText", $("tpText").value); tpPage = 0; tpShow(); });
+  $("tpSec").addEventListener("change", () => { store.set("tpSec", +$("tpSec").value); if (tpTimer) { tpStop(); tpToggleAuto(); } });
+  $("tpAuto").addEventListener("change", () => { if ($("tpAuto").checked !== !!tpTimer) tpToggleAuto(); renderControls(); });
+}
+Object.assign(byId.prompter, {
+  enter() { tpShow(); },
+  tap(side) { tpGo(side === "R" ? 1 : -1); },
+  dbl() { tpStop(); $("tpAuto").checked = false; return false; },
+  action(ev) { if (ev === "auto") { tpToggleAuto(); $("tpAuto").checked = !!tpTimer; } },
+  buttons() { return [["前へ（左）", "", "L"], ["次へ（右）", "primary", "R"], [tpTimer ? "自動送りを止める" : "自動送りを始める", "small wide", "auto"]]; },
+  status() { return `${tpPage + 1}/${tpPages().length} ページ`; },
+});
+
+/* ================= ポモドーロ ================= */
+const pomo = { phase: "focus", round: 1, running: false, endsAt: 0, remain: null, lastKey: "" };
+const PHASE = { focus: ["FOCUS", "集中"], brk: ["BREAK", "休憩"], long: ["LONG BREAK", "長い休憩"] };
+
+function pomoLen(ph = pomo.phase) {
+  const id = ph === "focus" ? "pmFocus" : ph === "brk" ? "pmBreak" : "pmLong";
+  return Math.max(1, +$(id).value || 1) * 60000;
+}
+function pomoRemaining() { return pomo.running ? pomo.endsAt - Date.now() : (pomo.remain ?? pomoLen()); }
+function pomoToggle() {
+  if (pomo.running) { pomo.remain = pomoRemaining(); pomo.running = false; }
+  else { pomo.endsAt = Date.now() + pomoRemaining(); pomo.remain = null; pomo.running = true; }
+  pomoDraw(true);
+}
+function pomoNext(byTimer) {
+  if (pomo.phase === "focus") pomo.phase = pomo.round % 4 === 0 ? "long" : "brk";
+  else { pomo.phase = "focus"; pomo.round++; }
+  pomo.remain = null;
+  if (pomo.running) pomo.endsAt = Date.now() + pomoLen();
+  if (byTimer) { try { navigator.vibrate && navigator.vibrate([400, 150, 400]); } catch {} }
+  pomoDraw(true);
+}
+function pomoReset() {
+  Object.assign(pomo, { phase: "focus", round: 1, running: false, remain: null });
+  pomoDraw(true);
+}
+function pomoScreen() {
+  const ms = Math.max(0, pomoRemaining()), s = Math.ceil(ms / 1000);
+  const left = s > 60 ? `${Math.ceil(s / 60)} min left` : `${Math.ceil(s / 5) * 5} sec left`;
+  const filled = Math.round(20 * (1 - ms / pomoLen()));
+  return [
+    `${PHASE[pomo.phase][0]}   round ${pomo.round}`,
+    left + (pomo.running ? "" : "  (paused)"),
+    "[" + "#".repeat(filled) + "-".repeat(20 - filled) + "]",
+    "",
+    pomo.running ? "R: pause    L: skip" : "R: start    L: skip",
+  ];
+}
+function pomoDraw(force) {
+  const ms = Math.max(0, pomoRemaining()), s = Math.ceil(ms / 1000);
+  $("pmClock").textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  $("pmState").textContent = `${PHASE[pomo.phase][1]}・${pomo.round}回目・${pomo.running ? "動いています" : "止まっています"}`;
+  if (currentApp !== "pomo") return;
+  const lines = pomoScreen(), key = lines.join("\n");
+  if (force || key !== pomo.lastKey) { pomo.lastKey = key; show(lines); }
+  if (force) renderControls();
+}
+function pomoInit() {
+  for (const id of ["pmFocus", "pmBreak", "pmLong"]) {
+    $(id).value = store.get(id, $(id).value);
+    $(id).addEventListener("change", () => { store.set(id, +$(id).value); pomoDraw(true); });
+  }
+  $("pmReset").onclick = pomoReset;
+  setInterval(() => {
+    if (pomo.running && pomoRemaining() <= 0) pomoNext(true);
+    pomoDraw(false);
+  }, 1000);
+  pomoDraw(false);
+}
+Object.assign(byId.pomo, {
+  enter() { pomoDraw(true); },
+  tap(side) { side === "R" ? pomoToggle() : pomoNext(false); },
+  buttons() { return [["スキップ（左）", "", "L"], [pomo.running ? "一時停止（右）" : "スタート（右）", "primary", "R"]]; },
+  status() { return pomo.running ? "動作中" : ""; },
+});
+
+/* ================= ToDo ================= */
+let todos = store.get("todos", [
+  { t: "牛乳を買う", done: false },
+  { t: "メールに返信する", done: false },
+  { t: "部屋を片付ける", done: false },
+]);
+let tdCursor = 0;
+
+function tdSave() { store.set("todos", todos); }
+function tdScreen() {
+  if (!todos.length) return center(["ToDo", "", "(empty) add items on your phone"]);
+  const n = todos.length, finished = todos.filter((t) => t.done).length;
+  const startIdx = Math.max(0, Math.min(tdCursor - 1, n - 4));
+  const rows = todos.slice(startIdx, startIdx + 4).map((t, i) =>
+    fit(`${startIdx + i === tdCursor ? ">" : " "}${t.done ? "[x]" : "[ ]"} ${t.t}`));
+  return [`ToDo ${finished}/${n}      L: next  R: done`, ...rows];
+}
+function tdShow() {
+  tdRender();
+  if (currentApp === "todo") { renderControls(); show(tdScreen()); }
+}
+function tdTap(side) {
+  if (!todos.length) return;
+  if (side === "L") { tdCursor = (tdCursor + 1) % todos.length; return tdShow(); }
+  const item = todos[tdCursor];
+  item.done = !item.done;
+  if (item.done) {  // 次の未完了へ
+    for (let k = 1; k <= todos.length; k++) {
+      const j = (tdCursor + k) % todos.length;
+      if (!todos[j].done) { tdCursor = j; break; }
+    }
+  }
+  tdSave(); tdShow();
+}
+function tdRender() {
+  const ul = $("tdList");
+  ul.innerHTML = "";
+  if (tdCursor >= todos.length) tdCursor = Math.max(0, todos.length - 1);
+  todos.forEach((t, i) => {
+    const li = document.createElement("li");
+    li.className = (t.done ? "done " : "") + (i === tdCursor ? "cur" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = t.done; cb.id = "td" + i; cb.setAttribute("aria-label", t.t);
+    cb.onchange = () => { t.done = cb.checked; tdSave(); tdShow(); };
+    const sp = document.createElement("span");
+    sp.textContent = t.t;
+    sp.onclick = () => { tdCursor = i; tdShow(); };
+    const del = document.createElement("button");
+    del.className = "small"; del.textContent = "削除";
+    del.onclick = () => { todos.splice(i, 1); tdSave(); tdShow(); };
+    li.append(cb, sp, del);
+    ul.append(li);
+  });
+}
+$("tdForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const v = $("tdNew").value.trim();
+  if (!v) return;
+  todos.push({ t: v, done: false });
+  $("tdNew").value = "";
+  tdSave(); tdShow();
+});
+$("tdClear").onclick = () => { todos = todos.filter((t) => !t.done); tdCursor = 0; tdSave(); tdShow(); };
+Object.assign(byId.todo, {
+  enter() { tdShow(); },
+  tap: tdTap,
+  buttons() {
+    const cur = todos[tdCursor];
+    return [["次の項目（左）", "", "L"], [cur && cur.done ? "未完了に戻す（右）" : "完了（右）", "primary", "R"]];
+  },
+  status() { return todos.length ? `${todos.filter((t) => t.done).length}/${todos.length} 完了` : ""; },
+});
+
+/* ================= 画面の点灯・キーボード ================= */
 async function requestWake() {
   try { wakeLock = await navigator.wakeLock.request("screen"); } catch {}
 }
-function releaseWake() { try { wakeLock && wakeLock.release(); } catch {} wakeLock = null; }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && mode !== "idle" && $("wake").checked) requestWake(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (sides.L || sides.R) && $("wake").checked) requestWake(); });
 
 document.addEventListener("keydown", (e) => {
   if (e.target.matches("input, textarea, select")) return;
-  const k = e.key;
-  if (k === " " || k === "Enter") { e.preventDefault(); act(mode === "idle" ? "start" : mode === "question" ? "flip" : "known"); }
-  else if (k === "ArrowRight") act("known");
-  else if (k === "ArrowLeft") act("again");
-  else if (k === "q" || k === "Escape") act("quit");
+  const ev = { ArrowLeft: "L", ArrowRight: "R", " ": "R", Enter: "R", Escape: "D", Backspace: "D" }[e.key];
+  if (ev) { e.preventDefault(); input(ev); }
 });
 
+function connMsg(text) {
+  const el = $("connMsg");
+  el.textContent = text;
+  el.hidden = !text;
+}
+function explain(e) {
+  const m = `${e.name}: ${e.message}`;
+  if (/cancel/i.test(m)) return "機器の選択がキャンセルされました。一覧に G1 が出ない場合は、スマホの Bluetooth を一度オフ→オンにするか、「一覧にすべての機器を出す」にチェックを入れてもう一度押してください。";
+  if (/adapter|not available|unavailable|globally disabled|permission|denied/i.test(m))
+    return "Bluetooth が使えない状態です。①スマホの Bluetooth と位置情報をオンにする ②「設定」→「アプリ」→「Chrome」→「権限」で「付近のデバイス」と「位置情報」を許可する、の2つを確認して、もう一度押してください。（" + m + "）";
+  if (/gatt|connect|network/i.test(m))
+    return "メガネとの接続に失敗しました。Even アプリを強制停止してから、もう一度押してください。（" + m + "）";
+  return "接続できませんでした（" + m + "）。この文面を教えてください。";
+}
+
 /* ================= 起動 ================= */
-if (!navigator.bluetooth) { $("noBle").hidden = false; $("connL").disabled = $("connR").disabled = true; }
+if (!navigator.bluetooth) { $("noBle").hidden = false; $("connL").disabled = $("connR").disabled = true; log("navigator.bluetooth がありません: " + navigator.userAgent); }
+else if (navigator.bluetooth.getAvailability) {
+  navigator.bluetooth.getAvailability().then((ok) => {
+    log(`Bluetooth 利用可能: ${ok}`);
+    if (!ok) connMsg("スマホの Bluetooth がオフか、Chrome に Bluetooth の許可がありません。Bluetooth をオンにし、「設定」→「アプリ」→「Chrome」→「権限」で「付近のデバイス」を許可してください。");
+  }).catch(() => {});
+}
 $("connL").onclick = () => connect("L");
 $("connR").onclick = () => connect("R");
 bindReset();
 renderDecks();
-setControls();
-show(center(["G1 Flashcards", "", "Tap to start"]));
+tpInit(); pomoInit(); tdRender();
+renderHome();
+goHome();
+autoConnect();
 </script>
 </body>
 </html>
